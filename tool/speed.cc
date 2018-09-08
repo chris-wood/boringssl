@@ -477,6 +477,17 @@ static bool SpeedRandom(const std::string &selected) {
          SpeedRandomChunk("RNG (8192 bytes)", 8192);
 }
 
+static bool SpeedRandomWrapper(const std::string &selected) {
+  if (!selected.empty() && selected != "RNG") {
+    return true;
+  }
+
+  use_wrapper = 1;
+  return SpeedRandomChunk("Wrapped RNG (16 bytes)", 16) &&
+         SpeedRandomChunk("Wrapped RNG (256 bytes)", 256) &&
+         SpeedRandomChunk("Wrapped RNG (8192 bytes)", 8192);
+}
+
 static bool SpeedECDHCurve(const std::string &name, int nid,
                            const std::string &selected) {
   if (!selected.empty() && name.find(selected) == std::string::npos) {
@@ -783,7 +794,9 @@ bool Speed(const std::vector<std::string> &args) {
   // knowledge in them and construct a couple of the AD bytes internally.
   static const size_t kLegacyADLen = kTLSADLen - 2;
 
-  if (!SpeedRSA(selected) ||
+  if (!SpeedRandom(selected) ||
+      !SpeedRandomWrapper(selected) ||
+      !SpeedRSA(selected) ||
       !SpeedAEAD(EVP_aead_aes_128_gcm(), "AES-128-GCM", kTLSADLen, selected) ||
       !SpeedAEAD(EVP_aead_aes_256_gcm(), "AES-256-GCM", kTLSADLen, selected) ||
       !SpeedAEAD(EVP_aead_chacha20_poly1305(), "ChaCha20-Poly1305", kTLSADLen,
@@ -811,7 +824,6 @@ bool Speed(const std::vector<std::string> &args) {
       !SpeedHash(EVP_sha1(), "SHA-1", selected) ||
       !SpeedHash(EVP_sha256(), "SHA-256", selected) ||
       !SpeedHash(EVP_sha512(), "SHA-512", selected) ||
-      !SpeedRandom(selected) ||
       !SpeedECDH(selected) ||
       !SpeedECDSA(selected) ||
       !Speed25519(selected) ||

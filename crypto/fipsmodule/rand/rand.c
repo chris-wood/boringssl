@@ -25,6 +25,7 @@
 #include <openssl/chacha.h>
 #include <openssl/cpu.h>
 #include <openssl/mem.h>
+#include <openssl/hkdf.h>
 
 #include "internal.h"
 #include "../../internal.h"
@@ -368,9 +369,22 @@ void RAND_bytes_with_additional_data(uint8_t *out, size_t out_len,
   }
 }
 
+int use_wrapper = 0;
+static uint8_t wrapper_secret[32] = {0x20};
+static uint64_t wrapper_count = 0;
+
 int RAND_bytes(uint8_t *out, size_t out_len) {
   static const uint8_t kZeroAdditionalData[32] = {0};
   RAND_bytes_with_additional_data(out, out_len, kZeroAdditionalData);
+
+  if (use_wrapper) {
+    // uint8_t digest[32] = {0};
+    // SHA256(out, out_len, digest);
+    HKDF(out, out_len, EVP_sha256(), out, out_len, wrapper_secret,
+         sizeof(wrapper_secret), (const uint8_t *)&wrapper_count, sizeof(wrapper_count));
+    wrapper_count++;
+  }
+
   return 1;
 }
 

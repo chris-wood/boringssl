@@ -21,6 +21,9 @@
 extern "C" {
 #endif
 
+// Experimental randomness wrapper flag
+extern int use_wrapper;
+
 
 // Random number generation.
 

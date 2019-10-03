@@ -352,10 +352,45 @@ void RAND_bytes_with_additional_data(uint8_t *out, size_t out_len,
 #endif
 }
 
-int RAND_bytes(uint8_t *out, size_t out_len) {
+#include <openssl/hkdf.h>
+static uint8_t hash_sig[32];
+static uint64_t tag2 = 0;
+
+__unused int RAND_bytes_raw(uint8_t *out, size_t out_len) {
   static const uint8_t kZeroAdditionalData[32] = {0};
   RAND_bytes_with_additional_data(out, out_len, kZeroAdditionalData);
   return 1;
+}
+
+__unused static int RAND_bytes_wrap(uint8_t *out, size_t out_len) {
+  static const uint8_t kZeroAdditionalData[32] = {0};
+
+  // G'(n) = Expand(Extract(H(Sig(sk, tag1)), G(L)), tag2, n)
+
+  uint8_t GL[SHA256_DIGEST_LENGTH] = {};
+  size_t GL_len = 0;
+  uint8_t prk[SHA256_DIGEST_LENGTH] = {};
+  size_t prk_len = 0;
+
+  // v1 = G(L)
+  RAND_bytes_with_additional_data(GL, SHA256_DIGEST_LENGTH, kZeroAdditionalData);
+
+  // v2 = Extract(H(Sig(sk, tag1)), v1)
+  const EVP_MD *digest = EVP_sha256();
+  (void)HKDF_extract(prk, &prk_len, digest, hash_sig, sizeof(hash_sig), GL, GL_len);
+
+  // v3 = Expand(v2, tag2, n)
+  uint8_t tag2copy[sizeof(tag2)];
+  memcpy(tag2copy, &tag2, sizeof(tag2));
+  (void)HKDF_expand(out, out_len, digest, prk, prk_len, tag2copy, sizeof(tag2));
+
+  tag2++;
+
+  return 1;
+}
+
+int RAND_bytes(uint8_t *out, size_t out_len) {
+  return RAND_bytes_wrap(out, out_len);
 }
 
 int RAND_pseudo_bytes(uint8_t *buf, size_t len) {

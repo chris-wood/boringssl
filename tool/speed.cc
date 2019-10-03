@@ -138,7 +138,7 @@ static uint64_t time_now() {
 #endif
 
 static uint64_t g_timeout_seconds = 1;
-static std::vector<size_t> g_chunk_lengths = {16, 256, 1350, 8192, 16384};
+static std::vector<size_t> g_chunk_lengths = {16, 256, 512, 1024, 1350, 2048, 4096, 8192, 16384};
 
 static bool TimeFunction(TimeResults *results, std::function<bool()> func) {
   // total_us is the total amount of time that we'll aim to measure a function
@@ -1002,6 +1002,131 @@ static bool SpeedHRSS(const std::string &selected) {
   return true;
 }
 
+static bool SpeedRandomRawChunk(std::string name, size_t chunk_len) {
+  uint8_t scratch[16384];
+
+  if (chunk_len > sizeof(scratch)) {
+    return false;
+  }
+
+  name += ChunkLenSuffix(chunk_len);
+  TimeResults results;
+  if (!TimeFunction(&results, [chunk_len, &scratch]() -> bool {
+        RAND_bytes_raw(scratch, chunk_len);
+        return true;
+      })) {
+    return false;
+  }
+
+  results.PrintWithBytes(name, chunk_len);
+  return true;
+}
+
+static bool SpeedRandomnessRaw(const std::string &selected) {
+  if (!selected.empty() && selected != "RandomnessRaw") {
+    return true;
+  }
+
+  for (size_t chunk_len : g_chunk_lengths) {
+    if (!SpeedRandomRawChunk("RandomRaw", chunk_len)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool SpeedRandomWrapperChunk(std::string name, size_t chunk_len) {
+  uint8_t scratch[16384];
+
+  if (chunk_len > sizeof(scratch)) {
+    return false;
+  }
+
+  name += ChunkLenSuffix(chunk_len);
+  TimeResults results;
+  if (!TimeFunction(&results, [chunk_len, &scratch]() -> bool {
+        RAND_bytes(scratch, chunk_len);
+        return true;
+      })) {
+    return false;
+  }
+
+  results.PrintWithBytes(name, chunk_len);
+  return true;
+}
+
+static bool SpeedRandomnessWrapper(const std::string &selected) {
+  if (!selected.empty() && selected != "RandomnessWrapper") {
+    return true;
+  }
+
+  for (size_t chunk_len : g_chunk_lengths) {
+    if (!SpeedRandomWrapperChunk("RandomWrapper", chunk_len)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// static bool ConnectClientAndServer(bssl::UniquePtr<SSL> *out_client,
+//                                    bssl::UniquePtr<SSL> *out_server,
+//                                    SSL_CTX *client_ctx, SSL_CTX *server_ctx,
+//                                    const ClientConfig &config = ClientConfig(),
+//                                    bool do_handshake = true,
+//                                    bool shed_handshake_config = true) {
+//   bssl::UniquePtr<SSL> client(SSL_new(client_ctx)), server(SSL_new(server_ctx));
+//   if (!client || !server) {
+//     return false;
+//   }
+//   SSL_set_connect_state(client.get());
+//   SSL_set_accept_state(server.get());
+
+//   if (config.session) {
+//     SSL_set_session(client.get(), config.session);
+//   }
+//   if (!config.servername.empty() &&
+//       !SSL_set_tlsext_host_name(client.get(), config.servername.c_str())) {
+//     return false;
+//   }
+
+//   BIO *bio1, *bio2;
+//   if (!BIO_new_bio_pair(&bio1, 0, &bio2, 0)) {
+//     return false;
+//   }
+//   // SSL_set_bio takes ownership.
+//   SSL_set_bio(client.get(), bio1, bio1);
+//   SSL_set_bio(server.get(), bio2, bio2);
+
+//   SSL_set_shed_handshake_config(client.get(), shed_handshake_config);
+//   SSL_set_shed_handshake_config(server.get(), shed_handshake_config);
+
+//   if (do_handshake && !CompleteHandshakes(client.get(), server.get())) {
+//     return false;
+//   }
+
+//   *out_client = std::move(client);
+//   *out_server = std::move(server);
+//   return true;
+// }
+
+// static bool SpeedTLSConnection(const std::string &selected) {
+//   bssl::UniquePtr<SSL_CTX> client_ctx(SSL_CTX_new(TLS_method()));
+//   bssl::UniquePtr<SSL_CTX> server_ctx(SSL_CTX_new(TLS_method()));
+//   ASSERT_TRUE(client_ctx);
+//   ASSERT_TRUE(server_ctx);
+
+//   bssl::UniquePtr<X509> cert = GetTestCertificate();
+//   bssl::UniquePtr<EVP_PKEY> key = GetTestKey();
+//   ASSERT_TRUE(cert);
+//   ASSERT_TRUE(key);
+//   ASSERT_TRUE(SSL_CTX_use_certificate(server_ctx.get(), cert.get()));
+//   ASSERT_TRUE(SSL_CTX_use_PrivateKey(server_ctx.get(), key.get()));
+
+//   bssl::UniquePtr<SSL> client, server;
+// }
+
 static const struct argument kArguments[] = {
     {
         "-filter",
@@ -1125,6 +1250,8 @@ bool Speed(const std::vector<std::string> &args) {
       !SpeedHash(EVP_sha256(), "SHA-256", selected) ||
       !SpeedHash(EVP_sha512(), "SHA-512", selected) ||
       !SpeedRandom(selected) ||
+      !SpeedRandomnessRaw(selected) ||
+      !SpeedRandomnessWrapper(selected) ||
       !SpeedECDH(selected) ||
       !SpeedECDSA(selected) ||
       !Speed25519(selected) ||

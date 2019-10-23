@@ -569,7 +569,9 @@ ssl_ctx_st::ssl_ctx_st(const SSL_METHOD *ssl_method)
       ignore_tls13_downgrade(false),
       handoff(false),
       enable_early_data(false),
-      pq_experiment_signal(false) {
+      pq_experiment_signal(false),
+      ticket_request_count(0),
+      ticket_request_limit(2) {
   CRYPTO_MUTEX_init(&lock);
   CRYPTO_new_ex_data(&ex_data);
 }
@@ -1251,6 +1253,25 @@ void SSL_CTX_enable_pq_experiment_signal(SSL_CTX *ctx) {
 
 int SSL_pq_experiment_signal_seen(const SSL *ssl) {
   return ssl->s3->pq_experiment_signal_seen;
+}
+
+void SSL_CTX_set_ticket_request_count(SSL_CTX *ctx, uint8_t count) {
+  ctx->ticket_request_signal = true;
+  ctx->ticket_request_count = count;
+}
+
+void SSL_CTX_set_ticket_request_limit(SSL_CTX *ctx, uint8_t limit) {
+  ctx->ticket_request_limit = limit;
+}
+
+uint8_t SSL_get_ticket_request_count(const SSL *ssl) {
+  if (!ssl->s3->ticket_request_seen) {
+    return ssl->ctx->ticket_request_limit;
+  } else if (ssl->s3->ticket_request_count < ssl->ctx->ticket_request_limit) {
+    return ssl->s3->ticket_request_count;
+  } else {
+    return ssl->ctx->ticket_request_limit;
+  }
 }
 
 int SSL_set_quic_transport_params(SSL *ssl, const uint8_t *params,

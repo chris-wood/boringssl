@@ -1898,6 +1898,51 @@ TEST(SSLTest, SetBIO) {
   // is correct.
 }
 
+static uint8_t g_new_session_count;
+
+int NewSessionCallback(SSL *ssl, SSL_SESSION *session) {
+  g_new_session_count++;
+  return 0;
+}
+
+TEST_P(SSLVersionTest, TicketRequest) {
+  // Skip this for non-TLS 1.3 connections.
+  if (version() != TLS1_3_VERSION) {
+    return;
+  }
+
+  struct TicketRequestTest {
+    bool enabled;
+    uint8_t count, limit, expected_count;
+  };
+  static const TicketRequestTest kTicketRequestTests[] = {
+    {false, 0, 0, 2},
+    {true, 0, 0, 0},
+    {true, 0, 1, 0},
+    {true, 1, 1, 1},
+    {true, 2, 1, 1},
+  };
+
+  for (const TicketRequestTest &test : kTicketRequestTests) {
+    ASSERT_TRUE(UseCertAndKey(client_ctx_.get()));
+    SSL_CTX_set_session_cache_mode(client_ctx_.get(), SSL_SESS_CACHE_BOTH);
+    SSL_CTX_set_session_cache_mode(server_ctx_.get(), SSL_SESS_CACHE_BOTH);
+
+    if (test.enabled) {
+      SSL_CTX_set_ticket_request_count(client_ctx_.get(), test.count);
+      SSL_CTX_set_ticket_request_limit(server_ctx_.get(), test.limit);
+    }
+    SSL_CTX_sess_set_new_cb(client_ctx_.get(), NewSessionCallback);
+
+    g_new_session_count = 0;
+    ASSERT_TRUE(Connect());
+    ASSERT_TRUE(FlushNewSessionTickets(client_.get(), server_.get()));
+
+    ASSERT_EQ(SSL_get_ticket_request_count(server_.get()), test.expected_count);
+    ASSERT_EQ(g_new_session_count, test.expected_count);
+  }
+}
+
 static int VerifySucceed(X509_STORE_CTX *store_ctx, void *arg) { return 1; }
 
 TEST_P(SSLVersionTest, GetPeerCertificate) {

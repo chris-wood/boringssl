@@ -3057,6 +3057,24 @@ OPENSSL_EXPORT void SSL_CTX_enable_pq_experiment_signal(SSL_CTX *ctx);
 OPENSSL_EXPORT int SSL_pq_experiment_signal_seen(const SSL *ssl);
 
 
+// TLS ticket request extension.
+//
+// draft-ietf-tls-ticketrequests defines a new TLS extension ticket_request used
+// to communicate the amount of desired tickets clients wish to receive for a
+// connection.
+
+// SSL_CTX_set_ticket_request_count configures the count in |ctx|.
+OPENSSL_EXPORT void SSL_CTX_set_ticket_request_count(SSL_CTX *ctx, uint8_t count);
+
+// SSL_CTX_set_ticket_request_limit overrides the default limit of tickets (2)
+// for servers in |ctx|.
+OPENSSL_EXPORT void SSL_CTX_set_ticket_request_limit(SSL_CTX *ctx, uint8_t limit);
+
+// SSL_get_ticket_request_count fetches the number of tickets requested from a client
+// using |ssl|. This API has undefined behavior for clients.
+OPENSSL_EXPORT uint8_t SSL_get_ticket_request_count(const SSL *ssl);
+
+
 // QUIC transport parameters.
 //
 // draft-ietf-quic-tls defines a new TLS extension quic_transport_parameters

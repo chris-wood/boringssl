@@ -2919,6 +2919,58 @@ static bool ext_pq_experiment_signal_add_serverhello(SSL_HANDSHAKE *hs,
   return true;
 }
 
+// Ticket requests
+
+static bool ext_ticket_request_add_clienthello(SSL_HANDSHAKE *hs,
+                                               CBB *out) {
+  CBB contents;
+  if (hs->ssl->ctx->ticket_request_signal &&
+      (!CBB_add_u16(out, TLSEXT_TYPE_ticket_request) ||
+       !CBB_add_u16_length_prefixed(out, &contents) ||
+       !CBB_add_u8(&contents, hs->ssl->ctx->ticket_request_count) ||
+       !CBB_flush(out))) {
+    return false;
+  }
+
+  return true;
+}
+
+static bool ext_ticket_request_parse_serverhello(SSL_HANDSHAKE *hs,
+                                                 uint8_t *out_alert,
+                                                 CBS *contents) {
+  if (contents == nullptr) {
+    return true;
+  }
+
+  // Servers MUST NOT echo this extension.
+  return false;
+}
+
+static bool ext_ticket_request_parse_clienthello(SSL_HANDSHAKE *hs,
+                                                 uint8_t *out_alert,
+                                                 CBS *contents) {
+  if (contents == nullptr) {
+    return true;
+  }
+
+  if (CBS_len(contents) != sizeof(hs->ssl->s3->ticket_request_count)) {
+    return false;
+  }
+
+  if (!CBS_get_u8(contents, &hs->ssl->s3->ticket_request_count)) {
+    return false;
+  }
+  hs->ssl->s3->ticket_request_seen = true;
+
+  return true;
+}
+
+static bool ext_ticket_request_add_serverhello(SSL_HANDSHAKE *hs,
+                                               CBB *out) {
+  // Servers do not echo this extension
+  return true;
+}
+
 // kExtensions contains all the supported extensions.
 static const struct tls_extension kExtensions[] = {
   {
@@ -3114,6 +3166,14 @@ static const struct tls_extension kExtensions[] = {
     ext_pq_experiment_signal_parse_serverhello,
     ext_pq_experiment_signal_parse_clienthello,
     ext_pq_experiment_signal_add_serverhello,
+  },
+  {
+    TLSEXT_TYPE_ticket_request,
+    NULL,
+    ext_ticket_request_add_clienthello,
+    ext_ticket_request_parse_serverhello,
+    ext_ticket_request_parse_clienthello,
+    ext_ticket_request_add_serverhello,
   },
 };
 

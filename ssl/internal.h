@@ -2291,6 +2291,17 @@ struct SSL3_STATE {
   // sending/echoing the post-quantum experiment signal.
   bool pq_experiment_signal_seen : 1;
 
+  // tls_ticket_request_seen is true if the peer sent a ticket request
+  // extension.
+  bool ticket_request_seen : 1;
+
+  // ticket_request_count carries the ticket request count if one was observed.
+  uint8_t ticket_request_count;
+
+  // ticket_request_signal indicates that the client explicitly requested
+  // some number of tickets.
+  bool ticket_request_signal : 1;
+
   // alert_dispatch is true there is an alert in |send_alert| to be sent.
   bool alert_dispatch : 1;
 
@@ -3226,6 +3237,18 @@ struct ssl_ctx_st {
   // (for clients) or echoed (for servers) to indicate participation in an
   // experiment of post-quantum key exchanges.
   bool pq_experiment_signal : 1;
+
+  // ticket_request_count indicates the number of tickets requested from
+  // a client.
+  uint8_t ticket_request_count;
+
+  // ticket_request_signal indicates that the client explicitly requested
+  // some number of tickets.
+  bool ticket_request_signal : 1;
+
+  // ticket_request_limit indicates the default number of tickets to vend
+  // to clients. By default, the value is 2.
+  uint8_t ticket_request_limit;
 
  private:
   ~ssl_ctx_st();

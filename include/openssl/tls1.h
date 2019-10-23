@@ -274,6 +274,9 @@ extern "C" {
 #define TLSEXT_cert_compression_zlib 1
 #define TLSEXT_cert_compression_brotli 2
 
+// From https://tools.ietf.org/html/draft-ietf-tls-ticketrequests-03#section-4
+#define TLSEXT_TYPE_ticket_request 54539
+
 #define TLSEXT_MAXLEN_host_name 255
 
 // PSK ciphersuites from 4279

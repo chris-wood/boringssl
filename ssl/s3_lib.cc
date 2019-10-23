@@ -181,6 +181,8 @@ SSL3_STATE::SSL3_STATE()
       tls13_downgrade(false),
       token_binding_negotiated(false),
       pq_experiment_signal_seen(false),
+      ticket_request_seen(false),
+      ticket_request_count(0),
       alert_dispatch(false) {}
 
 SSL3_STATE::~SSL3_STATE() {}

@@ -24,6 +24,7 @@
 #include <openssl/bytestring.h>
 #include <openssl/digest.h>
 #include <openssl/hkdf.h>
+#include <openssl/ckdf.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
 
@@ -32,6 +33,24 @@
 
 
 BSSL_NAMESPACE_BEGIN
+
+static int kdf_extract(uint8_t *out_key, size_t *out_len,
+                      const EVP_MD *digest, const uint8_t *secret,
+                      size_t secret_len, const uint8_t *salt,
+                      size_t salt_len) {
+  const EVP_CIPHER *cipher = EVP_aes_256_gcm();
+  return CKDF_extract(out_key, out_len, cipher, secret, secret_len, salt, salt_len);
+  // return HKDF_extract(out_key, out_len, digest, secret, secret_len, salt, salt_len);
+}
+
+static int kdf_expand(uint8_t *out_key, size_t out_len,
+                      const EVP_MD *digest, const uint8_t *prk,
+                      size_t prk_len, const uint8_t *info,
+                      size_t info_len) {
+  const EVP_CIPHER *cipher = EVP_aes_256_gcm();
+  return CKDF_expand(out_key, out_len, cipher, prk, prk_len, info, info_len);
+  // return HKDF_expand(out_key, out_len, digest, prk, prk_len, info, info_len);
+}
 
 static bool init_key_schedule(SSL_HANDSHAKE *hs, uint16_t version,
                               const SSL_CIPHER *cipher) {
@@ -48,7 +67,7 @@ static bool init_key_schedule(SSL_HANDSHAKE *hs, uint16_t version,
 
 static bool hkdf_extract_to_secret(SSL_HANDSHAKE *hs, Span<const uint8_t> in) {
   size_t len;
-  if (!HKDF_extract(hs->secret().data(), &len, hs->transcript.Digest(),
+  if (!kdf_extract(hs->secret().data(), &len, hs->transcript.Digest(),
                     in.data(), in.size(), hs->secret().data(),
                     hs->secret().size())) {
     return false;
@@ -100,7 +119,7 @@ static bool hkdf_expand_label(Span<uint8_t> out, const EVP_MD *digest,
     return false;
   }
 
-  return HKDF_expand(out.data(), out.size(), digest, secret.data(),
+  return kdf_expand(out.data(), out.size(), digest, secret.data(),
                      secret.size(), hkdf_label.data(), hkdf_label.size());
 }
 
@@ -455,7 +474,7 @@ static bool tls13_psk_binder(uint8_t *out, size_t *out_len, uint16_t version,
 
   uint8_t early_secret[EVP_MAX_MD_SIZE] = {0};
   size_t early_secret_len;
-  if (!HKDF_extract(early_secret, &early_secret_len, digest, psk.data(),
+  if (!kdf_extract(early_secret, &early_secret_len, digest, psk.data(),
                     psk.size(), NULL, 0)) {
     return false;
   }

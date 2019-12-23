@@ -286,6 +286,7 @@ add_library(
   evp/scrypt.c
   evp/sign.c
   ex_data.c
+  ckdf/ckdf.c
   hkdf/hkdf.c
   hrss/hrss.c
   lhash/lhash.c
@@ -504,6 +505,7 @@ add_executable(
   fipsmodule/modes/gcm_test.cc
   fipsmodule/rand/ctrdrbg_test.cc
   fipsmodule/sha/sha_test.cc
+  ckdf/ckdf_test.cc
   hkdf/hkdf_test.cc
   hmac_extra/hmac_test.cc
   hrss/hrss_test.cc

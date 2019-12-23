@@ -169,8 +169,44 @@ static bool InitDigestWithData(EVP_MD_CTX *ctx, const EVP_MD *md,
   return true;
 }
 
+// return NID_undef;
+//     case SSL_3DES:
+//       return NID_des_ede3_cbc;
+//     case SSL_AES128:
+//       return NID_aes_128_cbc;
+//     case SSL_AES256:
+//       return NID_aes_256_cbc;
+//     case SSL_AES128GCM:
+//       return NID_aes_128_gcm;
+//     case SSL_AES256GCM:
+//       return NID_aes_256_gcm;
+//     case SSL_CHACHA20POLY1305:
+//       return NID_chacha20_poly1305;
+
 bool SSLTranscript::InitHash(uint16_t version, const SSL_CIPHER *cipher) {
   const EVP_MD *md = ssl_get_handshake_digest(version, cipher);
+  // int nid = SSL_CIPHER_get_cipher_nid(cipher);
+  // switch (nid) {
+  //   case NID_des_ede3_cbc:
+  //     cipher_ = EVP_des_ede3_ecb();
+  //     break;
+  //   case NID_aes_128_cbc:
+  //     cipher_ = EVP_aes_128_cbc();
+  //     break;
+  //   case NID_aes_256_cbc:
+  //     cipher_ = EVP_aes_256_cbc();
+  //     break;
+  //   case NID_aes_128_gcm:
+  //     cipher_ = EVP_aes_128_gcm();
+  //     break;
+  //   case NID_aes_256_gcm:
+  //     cipher_ = EVP_aes_256_gcm();
+  //     break;
+  //   case NID_chacha20_poly1305:
+  //   case NID_undef:
+  //   default:
+  //     return false;
+  // }
   return InitDigestWithData(hash_.get(), md, buffer_.get());
 }
 
@@ -185,6 +221,10 @@ size_t SSLTranscript::DigestLen() const {
 const EVP_MD *SSLTranscript::Digest() const {
   return EVP_MD_CTX_md(hash_.get());
 }
+
+// const EVP_CIPHER *SSLTranscript::Cipher() const {
+//   return cipher_;
+// }
 
 bool SSLTranscript::UpdateForHelloRetryRequest() {
   if (buffer_) {

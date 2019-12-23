@@ -709,6 +709,9 @@ class SSLTranscript {
   // |EVP_md5_sha1|.
   const EVP_MD *Digest() const;
 
+  // XXX(caw)
+  // const EVP_CIPHER *Cipher() const;
+
   // Update adds |in| to the handshake buffer and handshake hash, whichever is
   // enabled. It returns true on success and false on failure.
   bool Update(Span<const uint8_t> in);
@@ -730,6 +733,9 @@ class SSLTranscript {
   UniquePtr<BUF_MEM> buffer_;
   // hash, if initialized with an |EVP_MD|, maintains the handshake hash.
   ScopedEVP_MD_CTX hash_;
+  
+  // cipher, if initialized with an |EVP_CIPHER|, maintains the handshake hash.
+  // const EVP_CIPHER *cipher_;
 };
 
 // tls1_prf computes the PRF function for |ssl|. It fills |out|, using |secret|

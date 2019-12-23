@@ -316,9 +316,11 @@ enum {
   ERR_LIB_ECDSA,
   ERR_LIB_ECDH,
   ERR_LIB_HMAC,
+  ERR_LIB_CMAC,
   ERR_LIB_DIGEST,
   ERR_LIB_CIPHER,
   ERR_LIB_HKDF,
+  ERR_LIB_CKDF,
   ERR_LIB_USER,
   ERR_NUM_LIBS
 };
@@ -362,6 +364,8 @@ enum {
 #define ERR_R_DIGEST_LIB ERR_LIB_DIGEST
 #define ERR_R_CIPHER_LIB ERR_LIB_CIPHER
 #define ERR_R_HKDF_LIB ERR_LIB_HKDF
+#define ERR_R_CKDF_LIB ERR_LIB_CKDF
+#define ERR_R_CMAC_LIB ERR_LIB_CMAC
 
 // The following values are global reason codes. They may occur in any library.
 #define ERR_R_FATAL 64

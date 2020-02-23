@@ -386,7 +386,8 @@ enum ssl_verify_result_t ssl_verify_peer_cert(SSL_HANDSHAKE *hs) {
 // SSL_VERIFY_NONE
 // 3. We don't call the OCSP callback.
 // 4. We only support custom verify callbacks.
-enum ssl_verify_result_t ssl_reverify_peer_cert(SSL_HANDSHAKE *hs) {
+enum ssl_verify_result_t ssl_reverify_peer_cert(SSL_HANDSHAKE *hs,
+                                                bool send_alert) {
   SSL *const ssl = hs->ssl;
   assert(ssl->s3->established_session == nullptr);
   assert(hs->config->verify_mode != SSL_VERIFY_NONE);
@@ -399,7 +400,9 @@ enum ssl_verify_result_t ssl_reverify_peer_cert(SSL_HANDSHAKE *hs) {
 
   if (ret == ssl_verify_invalid) {
     OPENSSL_PUT_ERROR(SSL, SSL_R_CERTIFICATE_VERIFY_FAILED);
-    ssl_send_alert(ssl, SSL3_AL_FATAL, alert);
+    if (send_alert) {
+      ssl_send_alert(ssl, SSL3_AL_FATAL, alert);
+    }
   }
 
   return ret;
@@ -466,6 +469,13 @@ enum ssl_hs_wait_t ssl_get_finished(SSL_HANDSHAKE *hs) {
   } else {
     OPENSSL_memcpy(ssl->s3->previous_server_finished, finished, finished_len);
     ssl->s3->previous_server_finished_len = finished_len;
+  }
+
+  // The Finished message should be the end of a flight.
+  if (ssl->method->has_unprocessed_handshake_data(ssl)) {
+    ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_UNEXPECTED_MESSAGE);
+    OPENSSL_PUT_ERROR(SSL, SSL_R_EXCESS_HANDSHAKE_DATA);
+    return ssl_hs_error;
   }
 
   ssl->method->next_message(ssl);
@@ -618,10 +628,15 @@ int ssl_run_handshake(SSL_HANDSHAKE *hs, bool *out_early_return) {
         hs->wait = ssl_hs_ok;
         return -1;
 
-      case ssl_hs_handback:
+      case ssl_hs_handback: {
+        int ret = ssl->method->flush_flight(ssl);
+        if (ret <= 0) {
+          return ret;
+        }
         ssl->s3->rwstate = SSL_ERROR_HANDBACK;
         hs->wait = ssl_hs_handback;
         return -1;
+      }
 
       case ssl_hs_x509_lookup:
         ssl->s3->rwstate = SSL_ERROR_WANT_X509_LOOKUP;

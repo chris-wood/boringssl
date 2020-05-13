@@ -375,7 +375,11 @@ static enum ssl_verify_result_t VerifyCallback(SSL *ssl, uint8_t *out_alert) {
   const STACK_OF(CRYPTO_BUFFER) *chain = SSL_get0_peer_certificates(ssl);
   for (size_t i = 0; i < sk_CRYPTO_BUFFER_num(chain); i++) {
     CRYPTO_BUFFER *cert_buffer = sk_CRYPTO_BUFFER_value(chain, i);
-    total_size += CRYPTO_BUFFER_len(cert_buffer);
+    size_t cert_len = CRYPTO_BUFFER_len(cert_buffer);
+    if (i == 0) {
+      printf("ee,%zu\n", cert_len);
+    }
+    total_size += cert_len;
   }
   printf("chain,%zu\n", total_size);
   return ssl_verify_ok;

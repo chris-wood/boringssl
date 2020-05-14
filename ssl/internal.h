@@ -1370,16 +1370,8 @@ bool tls13_set_traffic_key(SSL *ssl, enum ssl_encryption_level_t level,
                            Span<const uint8_t> traffic_secret);
 
 // tls13_derive_early_secret derives the early traffic secret. It returns true
-// on success and false on error. Unlike with other traffic secrets, this
-// function does not pass the keys to QUIC. Call
-// |tls13_set_early_secret_for_quic| to do so. This is done to due to an
-// ordering complication around resolving HelloRetryRequest on the server.
+// on success and false on error.
 bool tls13_derive_early_secret(SSL_HANDSHAKE *hs);
-
-// tls13_set_early_secret_for_quic passes the early traffic secrets, as
-// derived by |tls13_derive_early_secret|, to QUIC. It returns true on success
-// and false on error.
-bool tls13_set_early_secret_for_quic(SSL_HANDSHAKE *hs);
 
 // tls13_derive_handshake_secrets derives the handshake traffic secret. It
 // returns true on success and false on error.
@@ -2153,14 +2145,20 @@ struct SSL_PROTOCOL_METHOD {
   int (*flush_flight)(SSL *ssl);
   // on_handshake_complete is called when the handshake is complete.
   void (*on_handshake_complete)(SSL *ssl);
-  // set_read_state sets |ssl|'s read cipher state to |aead_ctx|. It returns
-  // true on success and false if changing the read state is forbidden at this
-  // point.
-  bool (*set_read_state)(SSL *ssl, UniquePtr<SSLAEADContext> aead_ctx);
-  // set_write_state sets |ssl|'s write cipher state to |aead_ctx|. It returns
-  // true on success and false if changing the write state is forbidden at this
-  // point.
-  bool (*set_write_state)(SSL *ssl, UniquePtr<SSLAEADContext> aead_ctx);
+  // set_read_state sets |ssl|'s read cipher state and level to |aead_ctx| and
+  // |level|. In QUIC, |aead_ctx| is a placeholder object and |secret_for_quic|
+  // is the original secret. This function returns true on success and false on
+  // error.
+  bool (*set_read_state)(SSL *ssl, ssl_encryption_level_t level,
+                         UniquePtr<SSLAEADContext> aead_ctx,
+                         Span<const uint8_t> secret_for_quic);
+  // set_write_state sets |ssl|'s write cipher state and level to |aead_ctx| and
+  // |level|. In QUIC, |aead_ctx| is a placeholder object and |secret_for_quic|
+  // is the original secret. This function returns true on success and false on
+  // error.
+  bool (*set_write_state)(SSL *ssl, ssl_encryption_level_t level,
+                          UniquePtr<SSLAEADContext> aead_ctx,
+                          Span<const uint8_t> secret_for_quic);
 };
 
 // The following wrappers call |open_*| but handle |read_shutdown| correctly.
@@ -2693,6 +2691,9 @@ struct SSL_CONFIG {
   // Contains the QUIC transport params that this endpoint will send.
   Array<uint8_t> quic_transport_params;
 
+  // Contains the context used to decide whether to accept early data in QUIC.
+  Array<uint8_t> quic_early_data_context;
+
   // verify_sigalgs, if not empty, is the set of signature algorithms
   // accepted from the peer in decreasing order of preference.
   Array<uint16_t> verify_sigalgs;
@@ -2744,6 +2745,11 @@ struct SSL_CONFIG {
   // workaround for https://bugs.openjdk.java.net/browse/JDK-8211806.
   bool jdk11_workaround : 1;
 };
+
+// Computes a SHA-256 hash of the transport parameters and early data context
+// for QUIC, putting the hash in |SHA256_DIGEST_LENGTH| bytes at |hash_out|.
+bool compute_quic_early_data_hash(const SSL_CONFIG *config,
+                                  uint8_t hash_out[SHA256_DIGEST_LENGTH]);
 
 // From RFC 8446, used in determining PSK modes.
 #define SSL_PSK_DHE_KE 0x1
@@ -3555,6 +3561,13 @@ struct ssl_session_st {
 
   // is_server is whether this session was created by a server.
   bool is_server : 1;
+
+  // is_quic indicates whether this session was created using QUIC.
+  bool is_quic : 1;
+
+  // quic_early_data_hash is used to determine whether early data must be
+  // rejected when performing a QUIC handshake.
+  bssl::Array<uint8_t> quic_early_data_hash;
 
  private:
   ~ssl_session_st();

@@ -300,9 +300,8 @@ TEST(CKDFTest, TestVectors) {
     uint8_t oneshot_output[EVP_MAX_BLOCK_LENGTH];
     size_t oneshot_output_len = 0;
     CKDF(oneshot_output, oneshot_output_len, cipher, ikm, ikm_len, salt, salt_len, info, info_len);
-    
-    // ASSERT_TRUE(HKDF_extract(prk, &prk_len, test->md_func(), test->ikm,
-    //                          test->ikm_len, test->salt, test->salt_len));
+
+    ASSERT_TRUE(memcmp(oneshot_output, output) == 0);
     // EXPECT_EQ(Bytes(test->prk, test->prk_len), Bytes(prk, prk_len));
 
     // uint8_t buf[82];

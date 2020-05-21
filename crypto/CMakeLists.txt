@@ -423,6 +423,13 @@ add_library(
   x509v3/v3_sxnet.c
   x509v3/v3_utl.c
 
+  ../third_party/blake3/c/blake3.c
+  ../third_party/blake3/c/blake3_dispatch.c
+  ../third_party/blake3/c/blake3_portable.c
+  ../third_party/blake3/c/blake3_sse41_x86-64_unix.S
+  ../third_party/blake3/c/blake3_avx2_x86-64_unix.S
+  ../third_party/blake3/c/blake3_avx512_x86-64_unix.S
+
   $<TARGET_OBJECTS:fipsmodule>
 
   ${CRYPTO_ARCH_SOURCES}

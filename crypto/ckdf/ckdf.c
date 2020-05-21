@@ -20,16 +20,17 @@
 #include <openssl/err.h>
 #include <openssl/cmac.h>
 #include <openssl/cipher.h>
+#include <openssl/sha.h>
 
 #include "../internal.h"
 
 
+// https://www.ietf.org/archive/id/draft-agl-ckdf-01.txt
 int CKDF(uint8_t *out_key, size_t out_len, const EVP_CIPHER *cipher,
          const uint8_t *secret, size_t secret_len, const uint8_t *salt,
          size_t salt_len, const uint8_t *info, size_t info_len) {
-  // TODO(caw): reference to CKDF
-  uint8_t prk[EVP_MAX_BLOCK_LENGTH];
-  size_t prk_len;
+  uint8_t prk[EVP_MAX_BLOCK_LENGTH] = {};
+  size_t prk_len = 0;
 
   if (!CKDF_extract(prk, &prk_len, cipher, secret, secret_len, salt,
                     salt_len) ||
@@ -40,99 +41,107 @@ int CKDF(uint8_t *out_key, size_t out_len, const EVP_CIPHER *cipher,
   return 1;
 }
 
+// https://www.ietf.org/archive/id/draft-agl-ckdf-01.txt
 int CKDF_extract(uint8_t *out_key, size_t *out_len, const EVP_CIPHER *cipher,
                  const uint8_t *secret, size_t secret_len, const uint8_t *salt,
                  size_t salt_len) {
-  // https://tools.ietf.org/html/rfc5869#section-2.2
 
   // If salt is not given, HashLength zeros are used. However, HMAC does that
   // internally already so we can ignore it.
 
-  // TODO(caw): check for empty salt/salt_len
-  // TODO(caw): implement CBC-MAC?
+  // Zero-length salts should be turned into a key of length equal to the
+  // corresponding cipher length.
+  uint8_t zero_salt[EVP_MAX_BLOCK_LENGTH] = {0};
+  if (!salt || salt_len == 0) {
+    salt = zero_salt;
+    salt_len = EVP_CIPHER_key_length(cipher);
+  }
 
-  // int AES_CMAC(uint8_t out[16], const uint8_t *key, size_t key_len,
-  //                           const uint8_t *in, size_t in_len)
+  // Compress down, if needed
+  uint8_t key[SHA256_DIGEST_LENGTH] = {0};
+  size_t key_len = EVP_CIPHER_key_length(cipher);
+  SHA256(salt, salt_len, key);
 
   CMAC_CTX *cmac = CMAC_CTX_new();
   if (!cmac) {
     OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
     return 0;
   }
-  if (!CMAC_Init(cmac, secret, secret_len, cipher, NULL)) {
+  if (!CMAC_Init(cmac, key, key_len, cipher, NULL)) {
     OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
     CMAC_CTX_free(cmac);
     return 0;
   }
 
-  if (!CMAC_Update(cmac, salt, salt_len) ||
+  if (!CMAC_Update(cmac, secret, secret_len) ||
       !CMAC_Final(cmac, out_key, out_len)) {
     OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
     CMAC_CTX_free(cmac);
     return 0;
   }
 
-  // unsigned len;
-  // if (HMAC(digest, salt, salt_len, secret, secret_len, out_key, &len) == NULL) {
-  //   OPENSSL_PUT_ERROR(HKDF, ERR_R_HMAC_LIB);
-  //   return 0;
-  // }
-  // *out_len = len;
-  // assert(*out_len == EVP_MD_size(digest));
-
   CMAC_CTX_free(cmac);
   return 1;
 }
 
+#include <stdio.h>
+
+// https://www.ietf.org/archive/id/draft-agl-ckdf-01.txt
 int CKDF_expand(uint8_t *out_key, size_t out_len, const EVP_CIPHER *cipher,
                 const uint8_t *prk, size_t prk_len, const uint8_t *info,
                 size_t info_len) {
-  // https://tools.ietf.org/html/rfc5869#section-2.3
-  const size_t digest_len = EVP_CIPHER_block_size(cipher);
-  uint8_t previous[EVP_MAX_BLOCK_LENGTH];
-  size_t n, done = 0;
-  unsigned i;
-  int ret = 0;
-  // HMAC_CTX hmac;
-  CMAC_CTX *cmac;
+  const size_t block_len = EVP_CIPHER_block_size(cipher);
+  uint8_t previous[EVP_MAX_BLOCK_LENGTH] = {0};
 
-  // Expand key material to desired length.
-  n = (out_len + digest_len - 1) / digest_len;
-  if (out_len + digest_len < out_len || n > 255) {
+  // N = ceil(L/16)
+  size_t N = (out_len + (block_len - 1)) / block_len;
+  if (out_len + block_len < out_len || N > 255) {
     OPENSSL_PUT_ERROR(CKDF, CKDF_R_OUTPUT_TOO_LARGE);
     return 0;
   }
 
-  // CMAC_CTX_init(&cmac);
-  // if (!CMAC_Init_ex(&cmac, prk, prk_len, digest, NULL)) {
-  //   goto out;
-  // }
+  // Compress down, if needed
+  // uint8_t key[SHA256_DIGEST_LENGTH] = {0};
+  // size_t key_len = EVP_CIPHER_key_length(cipher);
+  // SHA256(prk, prk_len, key);
+  const uint8_t *key = prk;
+  size_t key_len = EVP_CIPHER_key_length(cipher);
+  // printf("%zu %zu\n", prk_len, key_len);
 
-  cmac = CMAC_CTX_new();
+  // T = T(1) | T(2) | T(3) | ... | T(N)
+  // OKM = first L octets of T
+  //
+  // where:
+  // T(0) = empty string (zero length)
+  // T(1) = AES-CMAC(PRK, T(0) | info | 0x01)
+  // T(2) = AES-CMAC(PRK, T(1) | info | 0x02)
+  // T(3) = AES-CMAC(PRK, T(2) | info | 0x03)
+
+  CMAC_CTX *cmac = CMAC_CTX_new();
   if (!cmac) {
     OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
     return 0;
   }
+  // CMAC_CTX cmac;
 
-  if (!CMAC_Init(cmac, prk, prk_len, cipher, NULL)) {
-    goto out;
-  }
-
-  for (i = 0; i < n; i++) {
+  size_t ret = 0;
+  size_t done = 0;
+  for (size_t i = 0; i < N; i++) {
     uint8_t ctr = i + 1;
     size_t todo;
 
-    if (i != 0 && (!CMAC_Init(cmac, prk, prk_len, cipher, NULL) ||
-                   !CMAC_Update(cmac, previous, digest_len))) {
+    if (!CMAC_Init(cmac, key, key_len, cipher, NULL) ||
+        !CMAC_Update(cmac, previous, block_len)) {
+      OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
       goto out;
     }
     if (!CMAC_Update(cmac, info, info_len) ||
         !CMAC_Update(cmac, &ctr, 1) ||
-        !CMAC_Final(cmac, previous, NULL)) {
+        !CMAC_Final(cmac, previous, &todo)) {
+      OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);
       goto out;
     }
 
-    todo = digest_len;
     if (done + todo > out_len) {
       todo = out_len - done;
     }
@@ -143,7 +152,6 @@ int CKDF_expand(uint8_t *out_key, size_t out_len, const EVP_CIPHER *cipher,
   ret = 1;
 
 out:
-  // HMAC_CTX_cleanup(&hmac);
   CMAC_CTX_free(cmac);
   if (ret != 1) {
     OPENSSL_PUT_ERROR(CKDF, ERR_R_CMAC_LIB);

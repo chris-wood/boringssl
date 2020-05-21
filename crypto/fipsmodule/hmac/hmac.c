@@ -54,6 +54,8 @@
  * copied and put under another distribution licence
  * [including the GNU Public Licence.] */
 
+#include <stdio.h>
+
 #include <openssl/hmac.h>
 
 #include <assert.h>
@@ -68,6 +70,8 @@
 uint8_t *HMAC(const EVP_MD *evp_md, const void *key, size_t key_len,
               const uint8_t *data, size_t data_len, uint8_t *out,
               unsigned int *out_len) {
+  // printf("HMAC %zu %zu\n", key_len, data_len);
+
   HMAC_CTX ctx;
   HMAC_CTX_init(&ctx);
   if (!HMAC_Init_ex(&ctx, key, key_len, evp_md, NULL) ||
@@ -116,6 +120,8 @@ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, size_t key_len,
   if (md == NULL) {
     md = ctx->md;
   }
+
+  // printf("HMAC init %zu\n", key_len);
 
   // If either |key| is non-NULL or |md| has changed, initialize with a new key
   // rather than rewinding the previous one.
@@ -175,12 +181,15 @@ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, size_t key_len,
 }
 
 int HMAC_Update(HMAC_CTX *ctx, const uint8_t *data, size_t data_len) {
+  // printf("HMAC update %zu\n", data_len);
   return EVP_DigestUpdate(&ctx->md_ctx, data, data_len);
 }
 
 int HMAC_Final(HMAC_CTX *ctx, uint8_t *out, unsigned int *out_len) {
   unsigned int i;
   uint8_t buf[EVP_MAX_MD_SIZE];
+
+  // printf("HMAC final\n");
 
   // TODO(davidben): The only thing that can officially fail here is
   // |EVP_MD_CTX_copy_ex|, but even that should be impossible in this case.

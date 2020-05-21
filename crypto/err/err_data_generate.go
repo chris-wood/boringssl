@@ -60,9 +60,11 @@ var libraryNames = []string{
 	"ECDSA",
 	"ECDH",
 	"HMAC",
+	"CMAC",
 	"DIGEST",
 	"CIPHER",
 	"HKDF",
+	"CKDF",
 	"TRUST_TOKEN",
 	"USER",
 }

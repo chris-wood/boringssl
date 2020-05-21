@@ -149,6 +149,10 @@ static const struct argument kArguments[] = {
         "Print debug information about the handshake",
     },
     {
+         "-log-sizes", kBooleanArgument,
+         "Print TLS flight size information",
+    },
+    {
         "", kOptionalArgument, "",
     },
 };
@@ -329,7 +333,8 @@ static bool DoConnection(SSL_CTX *ctx,
   bssl::UniquePtr<BIO> bio_stderr(BIO_new_fp(stderr, BIO_NOCLOSE));
   PrintConnectionInfo(bio_stderr.get(), ssl.get());
 
-  return cb(ssl.get(), sock);
+  // return cb(ssl.get(), sock);
+  return true;
 }
 
 static void InfoCallback(const SSL *ssl, int type, int value) {
@@ -344,6 +349,31 @@ static void InfoCallback(const SSL *ssl, int type, int value) {
       fprintf(stderr, "Handshake progress: %s\n", SSL_state_string_long(ssl));
       break;
   }
+}
+
+static void MessageCallback(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg) {
+  switch (content_type) {
+    case SSL3_RT_HANDSHAKE:
+      printf("%s,%d,%zu\n", write_p ? "write" : "read", (int)((uint8_t *)buf)[0], len);
+      break;
+    case SSL3_RT_APPLICATION_DATA:
+      printf("%s,%s,%zu\n", write_p ? "write" : "read", "app", len);
+      break;
+    default:
+      break;
+  }
+}
+
+static enum ssl_verify_result_t VerifyCallback(SSL *ssl, uint8_t *out_alert) {
+  size_t total_size = 0;
+
+  const STACK_OF(CRYPTO_BUFFER) *chain = SSL_get0_peer_certificates(ssl);
+  for (size_t i = 0; i < sk_CRYPTO_BUFFER_num(chain); i++) {
+    CRYPTO_BUFFER *cert_buffer = sk_CRYPTO_BUFFER_value(chain, i);
+    total_size += CRYPTO_BUFFER_len(cert_buffer);
+  }
+  printf("chain,%zu\n", total_size);
+  return ssl_verify_ok;
 }
 
 bool Client(const std::vector<std::string> &args) {
@@ -530,6 +560,10 @@ bool Client(const std::vector<std::string> &args) {
 
   if (args_map.count("-debug") != 0) {
     SSL_CTX_set_info_callback(ctx.get(), InfoCallback);
+  }
+  if (args_map.count("-log-sizes") != 0) {
+    SSL_CTX_set_msg_callback(ctx.get(), MessageCallback);
+    SSL_CTX_set_custom_verify(ctx.get(), SSL_VERIFY_PEER, VerifyCallback);
   }
 
   if (args_map.count("-test-resumption") != 0) {

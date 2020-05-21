@@ -18,6 +18,13 @@ add_executable(
   speed.cc
   tool.cc
   transport_common.cc
+
+  #../third_party/blake3/c/blake3.c
+  #../third_party/blake3/c/blake3_dispatch.c
+  #../third_party/blake3/c/blake3_portable.c
+  #../third_party/blake3/c/blake3_sse41_x86-64_unix.S
+  #../third_party/blake3/c/blake3_avx2_x86-64_unix.S
+  #../third_party/blake3/c/blake3_avx512_x86-64_unix.S
 )
 
 add_dependencies(bssl global_target)

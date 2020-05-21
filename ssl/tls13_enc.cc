@@ -31,6 +31,8 @@
 #include "../crypto/internal.h"
 #include "internal.h"
 
+#define USE_CKDF 0 // experiment and flame graph
+
 
 BSSL_NAMESPACE_BEGIN
 
@@ -38,18 +40,27 @@ static int kdf_extract(uint8_t *out_key, size_t *out_len,
                       const EVP_MD *digest, const uint8_t *secret,
                       size_t secret_len, const uint8_t *salt,
                       size_t salt_len) {
-  const EVP_CIPHER *cipher = EVP_aes_256_gcm();
-  return CKDF_extract(out_key, out_len, cipher, secret, secret_len, salt, salt_len);
-  // return HKDF_extract(out_key, out_len, digest, secret, secret_len, salt, salt_len);
+#if USE_CKDF
+  const EVP_CIPHER *cipher = EVP_aes_128_cbc();
+  size_t desired_out_len = EVP_MD_size(digest);
+  int result = CKDF(out_key, desired_out_len, cipher, secret, secret_len, salt, salt_len, NULL, 0);
+  *out_len = desired_out_len;
+  return result;
+#else
+  return HKDF_extract(out_key, out_len, digest, secret, secret_len, salt, salt_len);
+#endif
 }
 
 static int kdf_expand(uint8_t *out_key, size_t out_len,
                       const EVP_MD *digest, const uint8_t *prk,
                       size_t prk_len, const uint8_t *info,
                       size_t info_len) {
-  const EVP_CIPHER *cipher = EVP_aes_256_gcm();
+#if USE_CKDF
+  const EVP_CIPHER *cipher = EVP_aes_128_cbc();
   return CKDF_expand(out_key, out_len, cipher, prk, prk_len, info, info_len);
-  // return HKDF_expand(out_key, out_len, digest, prk, prk_len, info, info_len);
+#else
+  return HKDF_expand(out_key, out_len, digest, prk, prk_len, info, info_len);
+#endif
 }
 
 static bool init_key_schedule(SSL_HANDSHAKE *hs, uint16_t version,

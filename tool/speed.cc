@@ -24,6 +24,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <openssl/asn1.h>
+#include <openssl/asn1t.h>
+#include <openssl/bytestring.h>
+#include <openssl/err.h>
+#include <openssl/mem.h>
+#include <openssl/obj.h>
+#include <openssl/span.h>
+
 #include <openssl/aead.h>
 #include <openssl/aes.h>
 #include <openssl/bn.h>
@@ -33,6 +41,10 @@
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
 #include <openssl/ec_key.h>
+#include <openssl/ckdf.h>
+#include <openssl/hkdf.h>
+#include <openssl/hmac.h>
+#include <openssl/cmac.h>
 #include <openssl/evp.h>
 #include <openssl/hrss.h>
 #include <openssl/mem.h>
@@ -40,6 +52,10 @@
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
 #include <openssl/trust_token.h>
+
+#include "../ssl/internal.h"
+
+#include "../third_party/blake3/c/blake3.h"
 
 #if defined(OPENSSL_WINDOWS)
 OPENSSL_MSVC_PRAGMA(warning(push, 3))
@@ -1019,6 +1035,543 @@ static PMBTOKEN_PRETOKEN *pmbtoken_pretoken_dup(PMBTOKEN_PRETOKEN *in) {
   return out;
 }
 
+static const char kTLS13LabelDerived[] = "derived";
+
+// HKDF-Expand-Label(Secret, Label, Context, Length) =
+//      HKDF-Expand(Secret, HkdfLabel, Length)
+
+// Where HkdfLabel is specified as:
+
+// struct {
+//     uint16 length = Length;
+//     opaque label<7..255> = "tls13 " + Label;
+//     opaque context<0..255> = Context;
+// } HkdfLabel;
+
+// Derive-Secret(Secret, Label, Messages) =
+//      HKDF-Expand-Label(Secret, Label,
+//                        Transcript-Hash(Messages), Hash.length)
+
+typedef int (*kdf_extract)(uint8_t *, size_t *, const EVP_MD *, const uint8_t *,
+                      size_t, const uint8_t *, size_t);
+typedef int (*kdf_expand)(uint8_t *, size_t, const EVP_MD *, const uint8_t *,
+                      size_t, const uint8_t *, size_t);
+
+static int ckdf_extract(uint8_t *out_key, size_t *out_len,
+                      const EVP_MD *digest, const uint8_t *secret,
+                      size_t secret_len, const uint8_t *salt,
+                      size_t salt_len) {
+  const EVP_CIPHER *cipher = EVP_aes_128_cbc();
+  size_t desired_out_len = EVP_MD_size(digest);
+  int result = CKDF(out_key, desired_out_len, cipher, secret, secret_len, salt, salt_len, NULL, 0);
+  *out_len = desired_out_len;
+  return result;
+}
+
+static int ckdf_extract_combine(uint8_t *out_key, size_t *out_len,
+  const EVP_MD *digest, const uint8_t *secret,
+  size_t secret_len, const uint8_t *salt,
+  size_t salt_len) {
+
+  uint8_t output1[EVP_MAX_MD_SIZE];
+  uint8_t output2[EVP_MAX_MD_SIZE];
+
+  size_t output_length = 0;
+  int result = ckdf_extract(output1, &output_length, digest, secret, secret_len, NULL, 0);
+  result |= ckdf_extract(output2, &output_length, digest, salt, salt_len, NULL, 0);
+  for (size_t i = 0; i < output_length; i++) {
+    out_key[i] = output1[i] ^ output2[i];
+  }
+  *out_len = output_length;
+
+  return result;
+}
+
+static int ckdf_expand(uint8_t *out_key, size_t out_len,
+                      const EVP_MD *digest, const uint8_t *prk,
+                      size_t prk_len, const uint8_t *info,
+                      size_t info_len) {
+  const EVP_CIPHER *cipher = EVP_aes_128_cbc();
+  return CKDF_expand(out_key, out_len, cipher, prk, prk_len, info, info_len);
+}
+
+static int blake3_expand(uint8_t *out_key, size_t out_len,
+                      const EVP_MD *digest, const uint8_t *prk,
+                      size_t prk_len, const uint8_t *info,
+                      size_t info_len) {
+  blake3_hasher hasher;
+  blake3_hasher_init_keyed(&hasher, prk);
+  blake3_hasher_update(&hasher, info, info_len);
+  blake3_hasher_finalize(&hasher, out_key, out_len);
+  return 1;
+  // return CKDF_expand(out_key, out_len, cipher, prk, prk_len, info, info_len);
+}
+
+static int hkdf_extract(uint8_t *out_key, size_t *out_len,
+                      const EVP_MD *digest, const uint8_t *secret,
+                      size_t secret_len, const uint8_t *salt,
+                      size_t salt_len) {
+  return HKDF_extract(out_key, out_len, digest, secret, secret_len, salt, salt_len);
+}
+
+static int hkdf_expand(uint8_t *out_key, size_t out_len,
+                      const EVP_MD *digest, const uint8_t *prk,
+                      size_t prk_len, const uint8_t *info,
+                      size_t info_len) {
+  return HKDF_expand(out_key, out_len, digest, prk, prk_len, info, info_len);
+}
+
+static bool expand_label(uint8_t *out, size_t out_len, const EVP_MD *digest,
+  const uint8_t *secret, size_t secret_len,
+  const char *label, size_t label_len,
+  const uint8_t *hash, size_t hash_len,
+  kdf_expand expander) {
+
+  const char *protocol_label = "tls13 ";
+  size_t protocol_label_len = strlen(protocol_label);
+  bssl::ScopedCBB cbb;
+  CBB child;
+  bssl::Array<uint8_t> hkdf_label;
+  if (!CBB_init(cbb.get(), 2 + 1 + protocol_label_len + label_len + 1 + hash_len) ||
+      !CBB_add_u16(cbb.get(), out_len) ||
+      !CBB_add_u8_length_prefixed(cbb.get(), &child) ||
+      !CBB_add_bytes(&child, (const uint8_t *)protocol_label, protocol_label_len) ||
+      !CBB_add_bytes(&child, (const uint8_t *)label, label_len) ||
+      !CBB_add_u16_length_prefixed(cbb.get(), &child) || // NOTE(caw): this uses a 2-byte length encoding, not 1 byte!
+      !CBB_add_bytes(&child, hash, hash_len) ||
+      !CBBFinishArray(cbb.get(), &hkdf_label)) {
+    return false;
+  }
+
+  return expander(out, out_len, digest, secret,
+                     secret_len, hkdf_label.data(), hkdf_label.size());
+}
+
+// derive_secret derives a secret of length |out.size()| and writes the result
+// in |out| with the given label, the current base secret, and the most
+// recently-saved handshake context. It returns true on success and false on
+// error.
+static bool derive_secret_with_expander(const EVP_MD *md, bssl::Span<const char> label, bssl::Span<const uint8_t> context,
+  bssl::Span<const uint8_t> secret, bssl::Span<uint8_t> out, kdf_expand expander) {
+  uint8_t context_hash[EVP_MAX_MD_SIZE];
+  size_t context_hash_len = EVP_MD_size(md);
+
+  // Hash the transcript
+  EVP_MD_CTX ctx;
+  EVP_MD_CTX_init(&ctx);
+  if (!EVP_DigestInit_ex(&ctx, md /* EVP_sha256() */, NULL) ||
+      !EVP_DigestUpdate(&ctx, context.data(), context.size()) ||
+      !EVP_DigestFinal_ex(&ctx, context_hash, (unsigned int *)&context_hash_len)) {
+    return false;
+  }
+  EVP_MD_CTX_cleanup(&ctx);
+
+  // And then expand it
+  return expand_label(out.data(), out.size(), md, secret.data(), secret.size(),
+    label.data(), label.size(), context_hash, context_hash_len, hkdf_expand);
+}
+
+// static bool derive_secret(const EVP_MD *md, bssl::Span<const char> label, bssl::Span<const uint8_t> context,
+//   bssl::Span<const uint8_t> secret, bssl::Span<uint8_t> out) {
+//   return derive_secret_with_expander(md, label, context, secret, out, hkdf_expand);
+// }
+
+// static bool derive_secret_with_hash(const EVP_MD *md, bssl::Span<const char> label, bssl::Span<const uint8_t> context,
+//   bssl::Span<const uint8_t> secret, bssl::Span<uint8_t> out, kdf_expand expander) {
+//   return derive_secret_with_expander(md, label, context, secret, out, expander);
+// }
+
+// static bool derive_secret_no_hash(const EVP_MD *md, bssl::Span<const char> label, bssl::Span<const uint8_t> context,
+//   bssl::Span<const uint8_t> secret, bssl::Span<uint8_t> out, kdf_expand expander) {
+//   return expand_label(out.data(), out.size(), md, secret.data(), secret.size(),
+//     label.data(), label.size(), context.data(), context.size(), expander);
+// }
+
+static bssl::Span<const char> label_to_span(const char *label) {
+  return bssl::MakeConstSpan(label, strlen(label));
+}
+
+// Transcript context sizes
+// ➜  boringssl git:(caw/ckdf-experiment) ✗ python mean.py top10k_results2.csv
+// 334.492195122
+// ➜  boringssl git:(caw/ckdf-experiment) ✗ python mean.py top10k_results2.csv
+// 3646.91195122
+// ➜  boringssl git:(caw/ckdf-experiment) ✗
+
+// Key schedule variants:
+// 0. Vanilla HKDF
+// 1. Collapsed HKDF
+// 2. Vanilla CKDF
+// 3. Collapsed CKDF
+// 4. Collapsed Blake3
+
+// dualPRF(k1, k2, label): F(k1, label) XOR F(k2, label)
+
+static bool SpeedBlake3(const std::string &selected, size_t context_len) {
+  if (!selected.empty() && selected.find("blake3") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t context[4096];
+  assert(context_len <= sizeof(context));
+  RAND_bytes(context, context_len);
+
+  uint8_t ikm[32];
+  size_t ikm_len = sizeof(ikm);
+  RAND_bytes(ikm, ikm_len);
+
+  uint8_t prk[EVP_MAX_MD_SIZE];
+  size_t prk_len = sizeof(prk);
+  RAND_bytes(prk, prk_len);
+
+  // uint8_t context_key[EVP_MAX_MD_SIZE];
+  // size_t context_key_len = sizeof(context_key);
+  // RAND_bytes(context_key, context_key_len);
+
+  uint8_t salt[32];
+  size_t salt_len = sizeof(salt);
+
+  const EVP_MD *digest = EVP_sha256();
+  uint8_t output[EVP_MAX_MD_SIZE * 3];
+
+  bssl::Span<const char> label_span = label_to_span(kTLS13LabelDerived);
+  bssl::Span<const uint8_t> context_span = bssl::MakeConstSpan(context, context_len);
+  // bssl::Span<const uint8_t> context_key_span = bssl::MakeConstSpan(context_key, context_key_len);
+  bssl::Span<uint8_t> output_span = bssl::MakeSpan(output, EVP_MD_size(digest));
+
+  // dualPRF
+  if (!ckdf_extract_combine(prk, &prk_len, digest, ikm, ikm_len, salt, salt_len)) {
+    return false;
+  }
+
+  // // Mix in the context
+  // if (!ckdf_extract(context_key, &context_key_len, digest, prk, prk_len, context, context_len)) {
+  //   return false;
+  // }
+  bssl::Span<const uint8_t> prk_span = bssl::MakeConstSpan(prk, prk_len);
+
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        // Derive (expand) three secrets
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, blake3_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, blake3_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, blake3_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+
+  char buffer[100];
+  snprintf(buffer, sizeof(buffer), "blake3 schedule ladder %zu", context_len);
+  std::string result = buffer;
+  results.Print(result);
+
+  return true;
+}
+
+static bool SpeedCKDF(const std::string &selected, size_t context_len) {
+  if (!selected.empty() && selected.find("ckdf") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t context[4096];
+  assert(context_len <= sizeof(context));
+  RAND_bytes(context, context_len);
+
+  uint8_t ikm[32];
+  size_t ikm_len = sizeof(ikm);
+  RAND_bytes(ikm, ikm_len);
+
+  uint8_t prk[EVP_MAX_MD_SIZE];
+  size_t prk_len = sizeof(prk);
+  RAND_bytes(prk, prk_len);
+
+  uint8_t salt[32];
+  size_t salt_len = sizeof(salt);
+
+  const EVP_MD *digest = EVP_sha256();
+  uint8_t output[EVP_MAX_MD_SIZE * 3];
+
+  bssl::Span<const char> label_span = label_to_span(kTLS13LabelDerived);
+  bssl::Span<const uint8_t> context_span = bssl::MakeConstSpan(context, context_len);
+  // bssl::Span<const uint8_t> context_key_span = bssl::MakeConstSpan(context_key, context_key_len);
+  bssl::Span<uint8_t> output_span = bssl::MakeSpan(output, EVP_MD_size(digest));
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        // // dualPRF -- mixed two PRFs
+        // if (!ckdf_extract_combine(prk, &prk_len, digest, ikm, ikm_len, salt, salt_len)) {
+        //   return false;
+        // }
+        // dualPRF HKDF
+        if (!hkdf_extract(prk, &prk_len, digest, ikm, ikm_len, salt, salt_len)) {
+          return false;
+        }
+        bssl::Span<const uint8_t> prk_span = bssl::MakeConstSpan(prk, prk_len);
+
+        // Derive (expand) three secrets
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, ckdf_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, ckdf_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, ckdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+
+  char buffer[100];
+  snprintf(buffer, sizeof(buffer), "CKDF schedule ladder %zu", context_len);
+  std::string result = buffer;
+  results.Print(result);
+
+  return true;
+}
+
+static bool SpeedHKDF(const std::string &selected, size_t context_len) {
+  if (!selected.empty() && selected.find("hkdf") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t context[4096];
+  assert(context_len <= sizeof(context));
+  RAND_bytes(context, context_len);
+
+  uint8_t ikm[32];
+  size_t ikm_len = sizeof(ikm);
+  RAND_bytes(ikm, ikm_len);
+
+  uint8_t prk[EVP_MAX_MD_SIZE];
+  size_t prk_len = sizeof(prk);
+  RAND_bytes(prk, prk_len);
+
+  uint8_t salt[32];
+  size_t salt_len = sizeof(salt);
+
+  const EVP_MD *digest = EVP_sha256();
+  uint8_t output[EVP_MAX_MD_SIZE * 3];
+
+  bssl::Span<const char> label_span = label_to_span(kTLS13LabelDerived);
+  bssl::Span<const uint8_t> context_span = bssl::MakeConstSpan(context, context_len);
+  bssl::Span<uint8_t> output_span = bssl::MakeSpan(output, EVP_MD_size(digest));
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        // dualPRF HKDF
+        if (!hkdf_extract(prk, &prk_len, digest, ikm, ikm_len, salt, salt_len)) {
+          return false;
+        }
+
+        bssl::Span<const uint8_t> prk_span = bssl::MakeConstSpan(prk, prk_len);
+
+        // Derive (expand) three secrets
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, hkdf_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, hkdf_expand)) {
+          return false;
+        }
+        if (!derive_secret_with_expander(digest, label_span, context_span, prk_span, output_span, hkdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+
+  char buffer[100];
+  snprintf(buffer, sizeof(buffer), "HKDF schedule ladder %zu", context_len);
+  std::string result = buffer;
+  results.Print(result);
+
+  return true;
+}
+
+static bool SpeedExtractor(const std::string &selected) {
+  if (!selected.empty() && selected.find("extractor") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t ikm[32];
+  RAND_bytes(ikm, sizeof(ikm));
+
+  uint8_t salt[32];
+  RAND_bytes(salt, sizeof(salt));
+
+  uint8_t output[32];
+  size_t output_len = 0;
+
+  const EVP_MD *digest = EVP_sha256();
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!ckdf_extract_combine(output, &output_len, digest, ikm, sizeof(ikm), salt, sizeof(salt))) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("CKDF extractor");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!hkdf_extract(output, &output_len, digest, ikm, sizeof(ikm), salt, sizeof(salt))) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HKDF extractor");
+
+  return true;
+}
+
+static bool SpeedPRF(const std::string &selected) {
+  if (!selected.empty() && selected.find("prf") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t x[16];
+  RAND_bytes(x, sizeof(x));
+
+  uint8_t y[16];
+  RAND_bytes(y, sizeof(y));
+
+  uint8_t z[32];
+  unsigned int z_len = 0;
+  RAND_bytes(z, sizeof(z));
+
+  uint8_t z2[32];
+  RAND_bytes(z2, sizeof(z2));
+
+  const EVP_MD *digest = EVP_sha256();
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (HMAC(digest, x, sizeof(x), y, sizeof(y), z, &z_len) == NULL) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HMAC-SHA256 dualPRF");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!AES_CMAC(z, x, sizeof(x), y, sizeof(y))) {
+          return false;
+        }
+        if (!AES_CMAC(z2, y, sizeof(y), x, sizeof(x))) {
+          return false;
+        }
+        for (size_t i = 0; i < 16; i++) {
+          z[i] ^= z2[i];
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("CMAC-AES-128 dualPRF");
+
+  return true;
+}
+
+static bool SpeedExpander(const std::string &selected) {
+  if (!selected.empty() && selected.find("expander") == std::string::npos) {
+    return true;
+  }
+
+  uint8_t key[32];
+  RAND_bytes(key, sizeof(key));
+
+  uint8_t context[32];
+  RAND_bytes(context, sizeof(context));
+
+  uint8_t info[128];
+  RAND_bytes(info, sizeof(info));
+
+  const char *label = "handshake secret";
+  size_t label_len = strlen(label);
+
+  uint8_t output[32];
+
+  const EVP_MD *digest = EVP_sha256();
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), ckdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("CKDF expander");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), hkdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HKDF expander");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), blake3_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("Blake3 expander");
+
+  return true;
+}
+
+static bool SpeedBlake3Deriver(const std::string &selected) {
+  if (!selected.empty() && selected.find("blake3") == std::string::npos) {
+    return true;
+  }
+
+  // blake3: initialize with "handshake" context (ladder phase), update with key
+  // and then context bytes, and then output secrets and next derived secret
+
+  TimeResults results;
+  if (!TimeFunction(&results, [&]() -> bool {
+        blake3_hasher hasher;
+        blake3_hasher_init_derive_key(&hasher, "context");
+
+        // Read input bytes from stdin.
+        uint8_t input[32];
+        blake3_hasher_update(&hasher, input, sizeof(input));
+
+        // Finalize the hash. BLAKE3_OUT_LEN is the default output length, 32 bytes.
+        uint8_t output[BLAKE3_OUT_LEN];
+        blake3_hasher_finalize(&hasher, output, BLAKE3_OUT_LEN);
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("blake3 derivation");
+
+  return true;
+}
+
 static bool SpeedTrustToken(std::string name, const TRUST_TOKEN_METHOD *method,
                             size_t batchsize, const std::string &selected) {
   if (!selected.empty() && selected.find("trusttoken") == std::string::npos) {
@@ -1375,6 +1928,16 @@ bool Speed(const std::vector<std::string> &args) {
       !SpeedRSAKeyGen(selected) ||
       !SpeedHRSS(selected) ||
       !SpeedHashToCurve(selected) ||
+      !SpeedBlake3Deriver(selected) ||
+      !SpeedHKDF(selected, 512) ||
+      !SpeedHKDF(selected, 4096) ||
+      !SpeedCKDF(selected, 512) ||
+      !SpeedCKDF(selected, 4096) ||
+      !SpeedBlake3(selected, 512) ||
+      !SpeedBlake3(selected, 4096) ||
+      !SpeedExpander(selected) ||
+      !SpeedExtractor(selected) ||
+      !SpeedPRF(selected) ||
       !SpeedTrustToken("TrustToken-Exp0-Batch1", TRUST_TOKEN_experiment_v0(), 1,
                        selected) ||
       !SpeedTrustToken("TrustToken-Exp0-Batch10", TRUST_TOKEN_experiment_v0(),

@@ -58,17 +58,17 @@
 #include "../internal.h"
 
 
-struct cmac_ctx_st {
-  EVP_CIPHER_CTX cipher_ctx;
-  // k1 and k2 are the CMAC subkeys. See
-  // https://tools.ietf.org/html/rfc4493#section-2.3
-  uint8_t k1[AES_BLOCK_SIZE];
-  uint8_t k2[AES_BLOCK_SIZE];
-  // Last (possibly partial) scratch
-  uint8_t block[AES_BLOCK_SIZE];
-  // block_used contains the number of valid bytes in |block|.
-  unsigned block_used;
-};
+// struct cmac_ctx_st {
+//   EVP_CIPHER_CTX cipher_ctx;
+//   // k1 and k2 are the CMAC subkeys. See
+//   // https://tools.ietf.org/html/rfc4493#section-2.3
+//   uint8_t k1[AES_BLOCK_SIZE];
+//   uint8_t k2[AES_BLOCK_SIZE];
+//   // Last (possibly partial) scratch
+//   uint8_t block[AES_BLOCK_SIZE];
+//   // block_used contains the number of valid bytes in |block|.
+//   unsigned block_used;
+// };
 
 static void CMAC_CTX_init(CMAC_CTX *ctx) {
   EVP_CIPHER_CTX_init(&ctx->cipher_ctx);

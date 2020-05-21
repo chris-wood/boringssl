@@ -733,7 +733,7 @@ class SSLTranscript {
   UniquePtr<BUF_MEM> buffer_;
   // hash, if initialized with an |EVP_MD|, maintains the handshake hash.
   ScopedEVP_MD_CTX hash_;
-  
+
   // cipher, if initialized with an |EVP_CIPHER|, maintains the handshake hash.
   // const EVP_CIPHER *cipher_;
 };

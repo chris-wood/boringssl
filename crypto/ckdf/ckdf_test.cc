@@ -270,7 +270,8 @@
 // }
 
 TEST(CKDFTest, TestVectors) {
-  const EVP_CIPHER *cipher = EVP_aes_256_gcm();
+  const EVP_CIPHER *cipher = EVP_aes_128_cbc();
+  const EVP_CIPHER *oneshot = EVP_aes_128_cbc();
 
   for (size_t i = 0; i < 32; i++) {
     SCOPED_TRACE(i);
@@ -287,21 +288,24 @@ TEST(CKDFTest, TestVectors) {
     size_t salt_len = sizeof(salt);
     RAND_bytes(salt, sizeof(salt));
 
-    CKDF_extract(prk, &prk_len, cipher, ikm, ikm_len, salt, salt_len);
+    int result = CKDF_extract(prk, &prk_len, cipher, ikm, ikm_len, salt, salt_len);
+    ASSERT_TRUE(result == 1);
 
     uint8_t info[16];
     size_t info_len = sizeof(info);
     RAND_bytes(info, sizeof(info));
 
     uint8_t output[EVP_MAX_BLOCK_LENGTH];
-    size_t output_len = 0;
-    CKDF_expand(output, output_len, cipher, prk, prk_len, info, info_len);
+    size_t output_len = EVP_MAX_BLOCK_LENGTH;
+    result = CKDF_expand(output, output_len, cipher, prk, prk_len, info, info_len);
+    ASSERT_TRUE(result == 1);
 
     uint8_t oneshot_output[EVP_MAX_BLOCK_LENGTH];
-    size_t oneshot_output_len = 0;
-    CKDF(oneshot_output, oneshot_output_len, cipher, ikm, ikm_len, salt, salt_len, info, info_len);
+    result = CKDF(oneshot_output, output_len, oneshot, ikm, ikm_len, salt, salt_len, info, info_len);
+    ASSERT_TRUE(result == 1);
 
-    ASSERT_TRUE(memcmp(oneshot_output, output) == 0);
+    EXPECT_EQ(Bytes(oneshot_output, output_len), Bytes(output, output_len));
+
     // EXPECT_EQ(Bytes(test->prk, test->prk_len), Bytes(prk, prk_len));
 
     // uint8_t buf[82];

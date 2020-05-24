@@ -1107,6 +1107,18 @@ static int blake3_expand(uint8_t *out_key, size_t out_len,
   // return CKDF_expand(out_key, out_len, cipher, prk, prk_len, info, info_len);
 }
 
+static int blake3_prf(uint8_t out[16], const void *key, size_t key_len,
+  const uint8_t *data, size_t data_len) {
+
+  blake3_hasher hasher;
+  uint8_t blake2key[BLAKE3_KEY_LEN];
+  memcpy(blake2key, key, key_len);
+  blake3_hasher_init_keyed(&hasher, blake2key);
+  blake3_hasher_update(&hasher, data, data_len);
+  blake3_hasher_finalize(&hasher, out, 16);
+  return 1;
+}
+
 static int hkdf_extract(uint8_t *out_key, size_t *out_len,
                       const EVP_MD *digest, const uint8_t *secret,
                       size_t secret_len, const uint8_t *salt,
@@ -1485,6 +1497,22 @@ static bool SpeedPRF(const std::string &selected) {
   }
   results.Print("CMAC-AES-128 dualPRF");
 
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!blake3_prf(z, x, sizeof(x), y, sizeof(y))) {
+          return false;
+        }
+        if (!blake3_prf(z2, y, sizeof(y), x, sizeof(x))) {
+          return false;
+        }
+        for (size_t i = 0; i < 16; i++) {
+          z[i] ^= z2[i];
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("Blake3 dualPRF");
+
   return true;
 }
 
@@ -1496,8 +1524,12 @@ static bool SpeedExpander(const std::string &selected) {
   uint8_t key[32];
   RAND_bytes(key, sizeof(key));
 
-  uint8_t context[32];
-  RAND_bytes(context, sizeof(context));
+  uint8_t contextSmall[32];
+  RAND_bytes(contextSmall, sizeof(contextSmall));
+  uint8_t contextMedium[512];
+  RAND_bytes(contextMedium, sizeof(contextMedium));
+  uint8_t contextLarge[4096];
+  RAND_bytes(contextLarge, sizeof(contextLarge));
 
   uint8_t info[128];
   RAND_bytes(info, sizeof(info));
@@ -1511,34 +1543,94 @@ static bool SpeedExpander(const std::string &selected) {
 
   TimeResults results;
   if (!TimeFunction(&results, [&]() -> bool {
-        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), ckdf_expand)) {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextSmall, sizeof(contextSmall), ckdf_expand)) {
           return false;
         }
         return true;
       })) {
     return false;
   }
-  results.Print("CKDF expander");
+  results.Print("CKDF expander (32B)");
 
   if (!TimeFunction(&results, [&]() -> bool {
-        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), hkdf_expand)) {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextMedium, sizeof(contextMedium), ckdf_expand)) {
           return false;
         }
         return true;
       })) {
     return false;
   }
-  results.Print("HKDF expander");
+  results.Print("CKDF expander (512B)");
 
   if (!TimeFunction(&results, [&]() -> bool {
-        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), context, sizeof(context), blake3_expand)) {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextLarge, sizeof(contextLarge), ckdf_expand)) {
           return false;
         }
         return true;
       })) {
     return false;
   }
-  results.Print("Blake3 expander");
+  results.Print("CKDF expander (4096B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextSmall, sizeof(contextSmall), hkdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HKDF expander (32B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextMedium, sizeof(contextMedium), hkdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HKDF expander (512B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextLarge, sizeof(contextLarge), hkdf_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("HKDF expander (4096B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextSmall, sizeof(contextSmall), blake3_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("Blake3 expander (32B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextMedium, sizeof(contextMedium), blake3_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("Blake3 expander (512B)");
+
+  if (!TimeFunction(&results, [&]() -> bool {
+        if (!expand_label(output, sizeof(output), digest, key, sizeof(key), label, sizeof(label_len), contextLarge, sizeof(contextLarge), blake3_expand)) {
+          return false;
+        }
+        return true;
+      })) {
+    return false;
+  }
+  results.Print("Blake3 expander (4096B)");
 
   return true;
 }

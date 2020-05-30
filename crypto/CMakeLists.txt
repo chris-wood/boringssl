@@ -339,6 +339,7 @@ add_library(
   thread_win.c
   trust_token/pmbtoken.c
   trust_token/trust_token.c
+  voprf/voprf.c
   x509/a_digest.c
   x509/a_sign.c
   x509/a_strex.c
@@ -539,6 +540,7 @@ add_executable(
   test/file_test_gtest.cc
   thread_test.cc
   trust_token/trust_token_test.cc
+  voprf/voprf_test.cc
   x509/x509_test.cc
   x509/x509_time_test.cc
   x509v3/tab_test.cc

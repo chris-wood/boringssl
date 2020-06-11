@@ -1137,25 +1137,25 @@ TEST(ECTest, HashToCurve) {
   static const HashToCurveTest kTests[] = {
       // See draft-irtf-cfrg-hash-to-curve-07, appendix G.2.1.
       {&ec_hash_to_curve_p384_xmd_sha512_sswu_draft07, NID_secp384r1,
-       "P384_XMD:SHA-512_SSWU_RO_TESTGEN", "",
-       "2fc0b9efdd63a8e43b4db88dc12f03c798f6fd91bccac0c9096185"
-       "4386e58fdc54fc2a01f0f358759054ce1f9b762025",
-       "949b936fabb72cdb02cd7980b86cb6a3adf286658e81301648851d"
-       "b8a49d9bec00ccb57698d559fc5960fa5030a8e54b"},
+       "QUUX-V01-CS02-with-P384_XMD:SHA-512_SSWU_RO_", "",
+       "c3144d47428d071d4169420c91006a0bd48d7259d492af86e7f82d"
+       "98e3497519d8550045557b7d55cc2a0f339df088b9",
+       "aa5f165f0146101363d1b34fe65bcf638532e3b2eb1744cdbd60e9"
+       "384c6c1838bbaea988963cc9f0f0902798e9f8058a"},
       {&ec_hash_to_curve_p384_xmd_sha512_sswu_draft07, NID_secp384r1,
-       "P384_XMD:SHA-512_SSWU_RO_TESTGEN", "abc",
-       "4f3338035391e8ce8ce40c974136f0edc97f392ffd44a643338741"
-       "8ed1b8c2603487e1688ec151f048fbc6b2c138c92f",
-       "152b90aef6558be328a3168855fb1906452e7167b0f7c8a56ff9d4"
-       "fa87d6fb522cdf8e409db54418b2c764fd26260757"},
+       "QUUX-V01-CS02-with-P384_XMD:SHA-512_SSWU_RO_", "abc",
+       "7bce42d575e64bc7828478f1bba94000c3ddb02ac03052061a7b7f"
+       "f81479823350e2a8e1da74e17be3016ab163094bcf",
+       "6634b2f0acb32b84b75ecfad96c676b3863cb3cec4f76c9bccef18"
+       "94a650830e60cd1c0f20c9d05e9ee58d8a611db87d"},
       {&ec_hash_to_curve_p384_xmd_sha512_sswu_draft07, NID_secp384r1,
-       "P384_XMD:SHA-512_SSWU_RO_TESTGEN", "abcdef0123456789",
-       "e9e5d7ac397e123d060ad44301cbc8eb972f6e64ebcff29dcc9b9a"
-       "10357902aace2240c580fec85e5b427d98b4e80703",
-       "916cb8963521ad75105be43cc4148e5a5bbb4fcf107f1577e4f7fa"
-       "3ca58cd786aa76890c8e687d2353393bc16c78ec4d"},
+       "QUUX-V01-CS02-with-P384_XMD:SHA-512_SSWU_RO_", "abcdef0123456789",
+       "af1a87bee29167676e41d8eb0518a9e44e570207519c11fa126c33"
+       "f32d62bbf6d312fd5812b182d59389f26ea496e58d",
+       "76ab30527be12a53a3bd63457072840ea516aa945fbe2dc48a42cf"
+       "bd031c3f93896e4a66093b2f56cc9da4694ec95f27"},
       {&ec_hash_to_curve_p384_xmd_sha512_sswu_draft07, NID_secp384r1,
-       "P384_XMD:SHA-512_SSWU_RO_TESTGEN",
+       "QUUX-V01-CS02-with-P384_XMD:SHA-512_SSWU_RO_",
        "a512_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1166,10 +1166,10 @@ TEST(ECTest, HashToCurve) {
        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-       "41941db59a7b8b633bd5bfa462f1e29a9f18e5a341445d90fc6eb9"
-       "37f2913224287b9dfb64742851f760eb14ca115ff9",
-       "1510e764f1be968d661b7aaecb26a6d38c98e5205ca150f0ae426d"
-       "2c3983c68e3a9ffb283c6ae4891d891b5705500475"},
+       "ed18cea59aabd90a3c84b48eeb09b42409f42340aec2ec1b706872"
+       "15fa4befc64fd4de4620d12e70b9890ad9a70e6ee8",
+       "dbc9b0e5e718539c785b7b787829a1c01b92591aed954e08b853dc"
+       "96fb303ba4bc8aad06712b8b3b4fae2047d6269d68"},
 
       // Note these tests do not match the tests vectors
       // draft-irtf-cfrg-hash-to-curve-06 due to a

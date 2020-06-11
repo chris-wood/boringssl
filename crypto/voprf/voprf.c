@@ -85,8 +85,8 @@ voprf_message_to_point(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x,
     VOPRF_CHECK_ARG_RETURN(M, 0);
     VOPRF_CHECK_ARG_RETURN(x, 0);
 
-    static const uint8_t kDST[] = "PMBTokensV0 HashT";
-    return ec_hash_to_curve_p384_xmd_sha512_sswu_draft07(group, M, kDST, sizeof(kDST), x, x_len);
+    static const uint8_t kDST[] = "RFCXXXX-VOPRF-P384_XMD:SHA-512_SSWU_RO_";
+    return ec_hash_to_curve_p384_xmd_sha512_sswu_draft07(group, M, kDST, sizeof(kDST) - 1, x, x_len);
 }
 
 int
@@ -149,29 +149,30 @@ int
 voprf_finalize(const EC_GROUP *group, uint8_t output[EVP_MAX_MD_SIZE], size_t *output_len,
     const uint8_t *x, size_t x_len, EC_RAW_POINT *y)
 {
-    const EVP_MD *digest = EVP_sha512();
-
     EC_AFFINE y_affine;
     if (!ec_jacobian_to_affine(group, &y_affine, y)) {
         return 0;
     }
 
-    CBB cbb;
-    if (!CBB_init(&cbb, EC_GROUP_order_bits(group)*8*2) ||
-        !point_to_cbb(&cbb, group, &y_affine) ||
+    // struct {
+    //   opaque dst<0..2^16-1>;
+    //   opaque input<0..2^16-1>;
+    //   opaque point<0..2^16-1>;
+    // } FinalizeInput;
+    CBB cbb, dst_inner, input_inner, point_inner;
+    if (!CBB_init(&cbb, 0) ||
+        !CBB_add_u16_length_prefixed(&cbb, &dst_inner) ||
+        !CBB_add_bytes(&dst_inner, (const uint8_t *)kFinalizeDST, sizeof(kFinalizeDST)) ||
+        !CBB_add_u16_length_prefixed(&cbb, &input_inner) ||
+        !CBB_add_bytes(&input_inner, x, x_len) ||
+        !CBB_add_u16_length_prefixed(&cbb, &point_inner) ||
+        !point_to_cbb(&point_inner, group, &y_affine) ||
         !CBB_flush(&cbb)) {
       return 0;
     }
 
-    unsigned int digest_len = 0;
-    HMAC_CTX ctx;
-    if (!HMAC_Init(&ctx, (const uint8_t *)kFinalizeDST, sizeof(kFinalizeDST), digest) ||
-        !HMAC_Update(&ctx, x, x_len) ||
-        !HMAC_Update(&ctx, CBB_data(&cbb), CBB_len(&cbb)) ||
-        !HMAC_Final(&ctx, output, &digest_len)) {
-        return 0;
-    }
+    SHA512(CBB_data(&cbb), CBB_len(&cbb), output);
+    *output_len = SHA512_DIGEST_LENGTH;
 
-    *output_len = digest_len;
     return 1;
 }

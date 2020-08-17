@@ -48,7 +48,7 @@ TEST(VOPRFTest, RandomPoint) {
   EC_GROUP *group = EC_GROUP_new_by_curve_name(NID_secp384r1);
   bssl::UniquePtr<EC_POINT> P(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> Q(EC_POINT_new(group));
-  ASSERT_EQ(voprf_generate_random_point(group, &P->raw), 1);
+  ASSERT_EQ(oprf_generate_random_point(group, &P->raw), 1);
 }
 
 TEST(VOPRFTest, BlindUnlind) {
@@ -56,11 +56,11 @@ TEST(VOPRFTest, BlindUnlind) {
   bssl::UniquePtr<EC_POINT> B(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> P(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> Q(EC_POINT_new(group));
-  ASSERT_EQ(voprf_generate_random_point(group, &B->raw), 1);
+  ASSERT_EQ(oprf_generate_random_point(group, &B->raw), 1);
 
   EC_SCALAR r;
-  ASSERT_EQ(voprf_blind_point(group, &P->raw, &B->raw, &r), 1);
-  ASSERT_EQ(voprf_unblind_point(group, &Q->raw, &P->raw, &r), 1);
+  ASSERT_EQ(oprf_blind_point(group, &P->raw, &B->raw, &r), 1);
+  ASSERT_EQ(oprf_unblind_point(group, &Q->raw, &P->raw, &r), 1);
   EXPECT_EQ(0, EC_POINT_cmp(group, B.get(), Q.get(), nullptr));
 }
 
@@ -72,8 +72,8 @@ TEST(VOPRFTest, MessageToPoint) {
   // Sign the same hashed point
   bssl::UniquePtr<EC_POINT> X1(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> X2(EC_POINT_new(group));
-  ASSERT_EQ(voprf_message_to_point(group, &X1->raw, (const uint8_t *)message, message_len), 1);
-  ASSERT_EQ(voprf_message_to_point(group, &X2->raw, (const uint8_t *)message, message_len), 1);
+  ASSERT_EQ(oprf_message_to_point(group, &X1->raw, (const uint8_t *)message, message_len), 1);
+  ASSERT_EQ(oprf_message_to_point(group, &X2->raw, (const uint8_t *)message, message_len), 1);
   EXPECT_EQ(0, EC_POINT_cmp(group, X1.get(), X2.get(), nullptr));
 }
 
@@ -83,23 +83,23 @@ TEST(VOPRFTest, BlindSignFinalize) {
   size_t message_len = sizeof(message);
 
   EC_SCALAR k, r;
-  ASSERT_EQ(voprf_generate_random_scalar(group, &k), 1);
+  ASSERT_EQ(oprf_generate_random_scalar(group, &k), 1);
 
   // Blind, sign, unblind
   bssl::UniquePtr<EC_POINT> R(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> M(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> N(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> T(EC_POINT_new(group));
-  ASSERT_EQ(voprf_message_to_point(group, &R->raw, (const uint8_t *)message, message_len), 1);
-  ASSERT_EQ(voprf_blind_point(group, &M->raw, &R->raw, &r), 1);
-  ASSERT_EQ(voprf_sign_point(group, &N->raw, &M->raw, &k), 1);
-  ASSERT_EQ(voprf_unblind_point(group, &T->raw, &N->raw, &r), 1);
+  ASSERT_EQ(oprf_message_to_point(group, &R->raw, (const uint8_t *)message, message_len), 1);
+  ASSERT_EQ(oprf_blind_point(group, &M->raw, &R->raw, &r), 1);
+  ASSERT_EQ(oprf_sign_point(group, &N->raw, &M->raw, &k), 1);
+  ASSERT_EQ(oprf_unblind_point(group, &T->raw, &N->raw, &r), 1);
 
   // Sign the same hashed point
   bssl::UniquePtr<EC_POINT> X(EC_POINT_new(group));
   bssl::UniquePtr<EC_POINT> Y(EC_POINT_new(group));
-  ASSERT_EQ(voprf_message_to_point(group, &X->raw, (const uint8_t *)message, message_len), 1);
-  ASSERT_EQ(voprf_sign_point(group, &Y->raw, &X->raw, &k), 1);
+  ASSERT_EQ(oprf_message_to_point(group, &X->raw, (const uint8_t *)message, message_len), 1);
+  ASSERT_EQ(oprf_sign_point(group, &Y->raw, &X->raw, &k), 1);
 
   EXPECT_EQ(0, EC_POINT_cmp(group, X.get(), R.get(), nullptr));
   EXPECT_EQ(0, EC_POINT_cmp(group, T.get(), Y.get(), nullptr));
@@ -107,11 +107,11 @@ TEST(VOPRFTest, BlindSignFinalize) {
   // Finalize and check that the results match
   uint8_t output1[EVP_MAX_MD_SIZE] = {0};
   size_t output1_len = 0;
-  ASSERT_EQ(voprf_finalize(group, output1, &output1_len, (const uint8_t *)message, message_len, &T->raw), 1);
+  ASSERT_EQ(oprf_finalize(group, output1, &output1_len, (const uint8_t *)message, message_len, &T->raw), 1);
 
   uint8_t output2[EVP_MAX_MD_SIZE] = {0};
   size_t output2_len = 0;
-  ASSERT_EQ(voprf_finalize(group, output2, &output2_len, (const uint8_t *)message, message_len, &Y->raw), 1);
+  ASSERT_EQ(oprf_finalize(group, output2, &output2_len, (const uint8_t *)message, message_len, &Y->raw), 1);
 
   EXPECT_EQ(Bytes(output1, output1_len), Bytes(output2, output1_len));
 }
@@ -205,7 +205,7 @@ TEST(VOPRFTest, Vectors) {
   HexToPoint(M_hex, group, &M_expected->raw);
 
   bssl::UniquePtr<EC_POINT> M(EC_POINT_new(group));
-  ASSERT_TRUE(voprf_message_to_point(group, &M->raw, input_bytes, input_len));
+  ASSERT_TRUE(oprf_message_to_point(group, &M->raw, input_bytes, input_len));
 
   size_t M_len = 0;
   uint8_t *M_bytes = PointToBytes(group, M.get(), &M_len);
@@ -215,13 +215,13 @@ TEST(VOPRFTest, Vectors) {
   EXPECT_EQ(0, EC_POINT_cmp(group, M.get(), M_expected.get(), nullptr));
 
   bssl::UniquePtr<EC_POINT> N(EC_POINT_new(group));
-  ASSERT_TRUE(voprf_sign_point(group, &N->raw, &M->raw, &k));
+  ASSERT_TRUE(oprf_sign_point(group, &N->raw, &M->raw, &k));
 
   EXPECT_EQ(0, EC_POINT_cmp(group, Y.get(), N.get(), nullptr));
 
   uint8_t output[EVP_MAX_MD_SIZE] = {0};
   size_t output_len = 0;
-  ASSERT_TRUE(voprf_finalize(group, output, &output_len, (const uint8_t *)input_bytes, input_len, &N->raw));
+  ASSERT_TRUE(oprf_finalize(group, output, &output_len, (const uint8_t *)input_bytes, input_len, &N->raw));
 
   EXPECT_EQ(output_hex,
             EncodeHex(bssl::MakeConstSpan(output, output_len)));

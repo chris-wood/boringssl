@@ -33,7 +33,7 @@ static const uint8_t kDefaultAdditionalData[32] = {0};
 static const char kFinalizeDST[18] = "oprf_derive_output";
 
 int
-voprf_generate_random_scalar(const EC_GROUP *group, EC_SCALAR *k)
+oprf_generate_random_scalar(const EC_GROUP *group, EC_SCALAR *k)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(k, 0);
@@ -44,7 +44,7 @@ voprf_generate_random_scalar(const EC_GROUP *group, EC_SCALAR *k)
 }
 
 int
-voprf_generate_random_point(const EC_GROUP *group, EC_RAW_POINT *out)
+oprf_generate_random_point(const EC_GROUP *group, EC_RAW_POINT *out)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
 
@@ -52,14 +52,14 @@ voprf_generate_random_point(const EC_GROUP *group, EC_RAW_POINT *out)
     OPENSSL_memcpy(&temp, out, sizeof(temp));
 
     EC_SCALAR scalar;
-    int result = voprf_blind_point(group, out, &temp, &scalar);
+    int result = oprf_blind_point(group, out, &temp, &scalar);
     OPENSSL_memset(&scalar, 0, sizeof(scalar));
 
     return result;
 }
 
 int
-voprf_blind(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_len, EC_SCALAR *r)
+oprf_blind(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_len, EC_SCALAR *r)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(M, 0);
@@ -67,11 +67,11 @@ voprf_blind(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_l
     VOPRF_CHECK_ARG_RETURN(r, 0);
 
     EC_POINT *X = EC_POINT_new(group);
-    if (!voprf_message_to_point(group, &X->raw, x, x_len)) {
+    if (!oprf_message_to_point(group, &X->raw, x, x_len)) {
         return 0;
     }
 
-    if (!voprf_blind_point(group, M, &X->raw, r)) {
+    if (!oprf_blind_point(group, M, &X->raw, r)) {
         return 0;
     }
 
@@ -79,7 +79,7 @@ voprf_blind(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_l
 }
 
 int
-voprf_message_to_point(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_len)
+oprf_message_to_point(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x, size_t x_len)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(M, 0);
@@ -90,7 +90,7 @@ voprf_message_to_point(const EC_GROUP *group, EC_RAW_POINT *M, const uint8_t *x,
 }
 
 int
-voprf_blind_point(const EC_GROUP *group, EC_RAW_POINT *M, EC_RAW_POINT *x, EC_SCALAR *r)
+oprf_blind_point(const EC_GROUP *group, EC_RAW_POINT *M, EC_RAW_POINT *x, EC_SCALAR *r)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(M, 0);
@@ -107,7 +107,7 @@ voprf_blind_point(const EC_GROUP *group, EC_RAW_POINT *M, EC_RAW_POINT *x, EC_SC
 }
 
 int
-voprf_unblind_point(const EC_GROUP *group, EC_RAW_POINT *x, EC_RAW_POINT *M, EC_SCALAR *r)
+oprf_unblind_point(const EC_GROUP *group, EC_RAW_POINT *x, EC_RAW_POINT *M, EC_SCALAR *r)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(x, 0);
@@ -122,7 +122,7 @@ voprf_unblind_point(const EC_GROUP *group, EC_RAW_POINT *x, EC_RAW_POINT *M, EC_
 }
 
 int
-voprf_sign_point(const EC_GROUP *group, EC_RAW_POINT *N, EC_RAW_POINT *M, EC_SCALAR *k)
+oprf_sign_point(const EC_GROUP *group, EC_RAW_POINT *N, EC_RAW_POINT *M, EC_SCALAR *k)
 {
     VOPRF_CHECK_ARG_RETURN(group, 0);
     VOPRF_CHECK_ARG_RETURN(N, 0);
@@ -146,7 +146,7 @@ static int point_to_cbb(CBB *out, const EC_GROUP *group,
 }
 
 int
-voprf_finalize(const EC_GROUP *group, uint8_t output[EVP_MAX_MD_SIZE], size_t *output_len,
+oprf_finalize(const EC_GROUP *group, uint8_t output[EVP_MAX_MD_SIZE], size_t *output_len,
     const uint8_t *x, size_t x_len, EC_RAW_POINT *y)
 {
     EC_AFFINE y_affine;
@@ -174,5 +174,36 @@ voprf_finalize(const EC_GROUP *group, uint8_t output[EVP_MAX_MD_SIZE], size_t *o
     SHA512(CBB_data(&cbb), CBB_len(&cbb), output);
     *output_len = SHA512_DIGEST_LENGTH;
 
+    return 1;
+}
+
+
+int OPRF_CTX_generate_random_key(OPRF_CTX *ctx, OPRF_KEY *)
+{
+    return 1;
+}
+
+int OPRF_CTX_generate_random_element(OPRF_CTX *ctx, OPRF_ELEMENT *)
+{
+    return 1;
+}
+
+int OPRF_CTX_blind(OPRF_CTX *ctx, OPRF_ELEMENT *, const uint8_t *, size_t, OPRF_KEY *)
+{
+    return 1;
+}
+
+int OPRF_CTX_unblind(OPRF_CTX *ctx, OPRF_ELEMENT *, OPRF_ELEMENT *, OPRF_KEY *)
+{
+    return 1;
+}
+
+int OPRF_CTX_evaluate(OPRF_CTX *ctx, OPRF_ELEMENT *, OPRF_KEY *, OPRF_ELEMENT *)
+{
+    return 1;
+}
+
+int OPRF_CTX_finalize(OPRF_CTX *ctx, const uint8_t *, size_t, OPRF_ELEMENT *, const uint8_t *, size_t)
+{
     return 1;
 }
